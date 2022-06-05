@@ -1,0 +1,35 @@
+{
+    "network": {
+        "ssid": "******",
+        "psk": "******"
+    },
+    "adc": {
+        "baseline_time": 30,
+        "interval": 100,
+        "timeout": 30,
+        "avg_count": 5,
+        "pins": [
+            {
+                "name": "sensor1pin32",
+                "pin": 32,
+                "atten": 11,
+                "zero_voltage": 2.5,
+                "max_voltage": 3.3,
+                "max_adc_read": 4095,
+                "max_amperage": 20
+            }
+        ]
+    },
+    "uart": {
+        "uart": 2,
+        "baudrate": 115200
+    },
+    "ntp_server": "192.168.1.1",
+    "timezone": -7,
+    "timezone_name": "PST",
+    "logging_console": 7,
+    "webrepl": {
+        "enabled": true,
+        "password": "test123"
+    }
+}
