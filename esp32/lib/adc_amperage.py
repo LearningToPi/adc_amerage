@@ -214,7 +214,7 @@ class AdcAmperage(BaseESP32Worker):
 
             # create a list to hold X number of records to average in
             for adc_conf in self.config['adc']['pins']:
-                adc_conf['log'] = [0] * adc_conf.get('avg_count', 5)
+                adc_conf['log'] = [0] * self.config['adc'].get('avg_count', 5)
             self.log(f"Starting amperage sampling for all pins. Stop in {self.config['adc'].get('timeout', 600)} seconds", INFO)
 
             # write the start time back for marking purposes
@@ -228,8 +228,8 @@ class AdcAmperage(BaseESP32Worker):
                 record = "DATA"
                 for adc_conf in self.config['adc']['pins']:
                     ticks = time.ticks_diff(time.ticks_ms(), start_ticks)
-                    amps = _calc_amperage(adc_conf['obj'].read(), adc_conf['baseline'], adc_conf['max_amperage'], adc_conf['zero_voltage'])
-                    adc_conf['log'][read_count % adc_conf.get('avg_count', 5)] = amps
+                    amps = _calc_amperage(adc_conf['obj'].read(), adc_conf.get('baseline', 4095/2), adc_conf['max_amperage'], adc_conf['zero_voltage'])
+                    adc_conf['log'][read_count % self.config['adc'].get('avg_count', 5)] = amps
                     # discard highest and lowest value
                     log_temp = adc_conf['log'].copy()
                     log_temp.sort()
@@ -267,7 +267,7 @@ class AdcAmperage(BaseESP32Worker):
         self.log('Starting single read', DEBUG)
         read_count = self.config['adc'].get('avg_count', 5)
         for adc_conf in self.config['adc']['pins']:
-            adc_conf['log'] = [0] * adc_conf.get('avg_count', 5)
+            adc_conf['log'] = [0] * self.config['adc'].get('avg_count', 5)
         start_ticks = time.ticks_ms()
         for i in range(read_count):
             for adc_conf in self.config['adc']['pins']:

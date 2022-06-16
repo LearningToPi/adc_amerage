@@ -12,6 +12,8 @@
   - [CMD Examples](#cmd-examples)
   - [Data Responses](#data-responses)
 
+View our load testing series here:  https://www.learningtopi.com/category/load-testing/
+
 ## Introduction
 This project utilizes a hall effect based linear current sensor and reports the information to a device connected on a UART interface (separate from the REPL console).
 
