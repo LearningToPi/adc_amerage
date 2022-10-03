@@ -68,6 +68,20 @@ class AdcAmperage(BaseESP32Worker):
         else:
             self.uart = None
 
+        # If init_button is configured, create the objects and start the async thread
+        self.init_pin = None
+        self.led_pin = None
+        self._lock = _thread.allocate_lock()
+        if 'init_button' in self.config and isinstance(self.config['init_button'].get('button_pin', None), int):
+            self.log(f"Initializing init button on pin {self.config['init_button'].get('button_pin')}...")
+            self.init_pin = Pin(self.config['init_button']['button_pin'], pull=Pin.PULL_DOWN, mode=Pin.IN)
+            self.switch_state = self.init_pin.value
+            uasyncio.create_task(self.button_loop(debounce=self.config['init_button'].get('debouce', 200)))
+            if isinstance(self.config['init_button'].get('led_pin', None), int):
+                self.log(f"Initializing LED on pin {self.config['init_button'].get('led_pin')}...")
+                self.led_pin = Pin(self.config['init_button']['led_pin'], mode=Pin.OUT, value=0)
+                self._stop_led = True
+
         # set the cpu frequency to the minimum
         freq(80000000)
 
@@ -137,6 +151,34 @@ class AdcAmperage(BaseESP32Worker):
                             self.uart.write(f"ERROR:Unknown Command {data}")
                 await uasyncio.sleep_ms(100)
 
+    async def button_loop(self, debounce=200):
+        """ Async process to check for a button press - pressing will start the init process """
+        self.log(f"Starting async button loop...")
+        while True:
+            state = self.init_pin.value()
+            if state != self.switch_state:
+                # switch state changed
+                self.switch_state = state
+                if state == 1:
+                    # trigger
+                    self.log(f"Init button press identified.  Calling sensor init...")
+                    uasyncio.create_task(self.baseline_ammeter())
+
+            # wait the debounce interval before rechecking
+            await uasyncio.sleep_ms(debounce)
+
+    async def led_flash(self, timeout=60, flashrate=.5):
+        """ Async process to flash the LED """
+        if self.led_pin is not None:
+            with self._lock:
+                self._stop_led = False
+            start_ticks = time.ticks_ms()
+            while not self._stop_led and time.ticks_diff(time.ticks_ms(), start_ticks) < timeout * 1000:
+                self.led_pin.on()
+                await uasyncio.sleep_ms(int(flashrate * 1000))
+                self.led_pin.off()
+                await uasyncio.sleep_ms(int(flashrate * 1000))
+
     @property
     def get_status(self) -> str:
         """ get the current state and return as a string:
@@ -179,6 +221,7 @@ class AdcAmperage(BaseESP32Worker):
         self.baseline_task = True
         if self.sampling_task:
             await self.stop_sampling()
+        uasyncio.create_task(self.led_flash())
         # set freq to max
         freq(240000000)
 
@@ -199,6 +242,8 @@ class AdcAmperage(BaseESP32Worker):
             self.log(f"{adc_conf.get('name', adc_conf['pin'])} baseline is {adc_conf['baseline']}", INFO)
 
         self.baseline_task = False
+        with self._lock:
+            self._stop_led = True
         # set the cpu frequency to the minimum
         freq(80000000)
 
@@ -206,6 +251,7 @@ class AdcAmperage(BaseESP32Worker):
         """ Start sampling on all pins using sampling rate """
         if not self.sampling_task:
             self.sampling_task = True
+            uasyncio.create_task(self.led_flash())
             # set freq to max
             freq(240000000)
 
@@ -246,6 +292,8 @@ class AdcAmperage(BaseESP32Worker):
                 self.uart.write(f'STOP:{time.time()}\n')
             self.log('Stopping amperage sampling for all pins.')
             self.sampling_task = False
+            with self._lock:
+                self._stop_led = True
             # set the cpu frequency to the minimum
             freq(80000000)
 

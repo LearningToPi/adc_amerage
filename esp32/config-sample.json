@@ -31,5 +31,10 @@
     "webrepl": {
         "enabled": true,
         "password": "test123"
+    },    
+    "init_button": {
+        "button_pin": 25,
+        "led_pin": 26,
+        "debouce": 200
     }
 }
