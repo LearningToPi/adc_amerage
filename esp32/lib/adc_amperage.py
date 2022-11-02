@@ -1,12 +1,11 @@
 import time
 import _thread
 import gc
-from sys import exit
 import uasyncio
 from machine import ADC, Pin, UART, freq
 from loglevel import INFO, ERROR, DEBUG
 from esp32_controller import BaseESP32Worker
-from utime import sleep_ms
+from utime import ticks_ms, ticks_diff, sleep_ms
 
 
 # UART/Ethernet command list - 'LIST' is explicitly supported and returns a list of the commands
@@ -21,6 +20,15 @@ COMMAND_LIST = [
 ]
 
 class AdcAmperage(BaseESP32Worker):
+    def __init__(self, **kwargs):
+        self._stop_led = None
+        self.switch_state = None
+        self.init_stop_time = None
+        self.baseline_task = None
+        self.sampling_task = None
+        self.sampling_stop_time = None
+        super().__init__(**kwargs)
+
     def run(self):
         """ Setup the ADC pins """
         self.log('Starting sensors...', INFO)
@@ -38,7 +46,7 @@ class AdcAmperage(BaseESP32Worker):
                 else:
                     atten_value = ADC.ATTN_0DB
                 adc_conf['obj'].atten(atten_value)
-                self.log(f"Initial read for {adc_conf.get('name', adc_conf['pin'])}:{adc_conf['obj'].read()}", DEBUG)
+                self.log(f"Initial read for {adc_conf.get('name', adc_conf['pin'])}:{adc_conf['obj'].read_uv()/1000.0}", DEBUG)
 
         except Exception as e:
             self.log(f'Error configuring ADC: {e}', ERROR)
@@ -121,7 +129,7 @@ class AdcAmperage(BaseESP32Worker):
                                 elif data_parts[1].replace('\n', '') == 'INTERVAL':
                                     self.log('Received INTERVAL Command.  Setting sampling interval (in ram only, does not update the config file).', DEBUG)
                                     if len(data_parts) >= 3:
-                                        self.config['adc']['interval'] = int(data_parts[2]) 
+                                        self.config['adc']['interval'] = int(data_parts[2])
 
                                 elif data_parts[1].replace('\n', '') == 'START':
                                     if not self.sampling_task:
@@ -153,7 +161,7 @@ class AdcAmperage(BaseESP32Worker):
 
     async def button_loop(self, debounce=200):
         """ Async process to check for a button press - pressing will start the init process """
-        self.log(f"Starting async button loop...")
+        self.log("Starting async button loop...")
         while True:
             state = self.init_pin.value()
             if state != self.switch_state:
@@ -161,7 +169,7 @@ class AdcAmperage(BaseESP32Worker):
                 self.switch_state = state
                 if state == 1:
                     # trigger
-                    self.log(f"Init button press identified.  Calling sensor init...")
+                    self.log("Init button press identified.  Calling sensor init...")
                     uasyncio.create_task(self.baseline_ammeter())
 
             # wait the debounce interval before rechecking
@@ -172,8 +180,8 @@ class AdcAmperage(BaseESP32Worker):
         if self.led_pin is not None:
             with self._lock:
                 self._stop_led = False
-            start_ticks = time.ticks_ms()
-            while not self._stop_led and time.ticks_diff(time.ticks_ms(), start_ticks) < timeout * 1000:
+            start_ticks = ticks_ms()
+            while not self._stop_led and ticks_diff(ticks_ms(), start_ticks) < timeout * 1000:  # type: ignore
                 self.led_pin.on()
                 await uasyncio.sleep_ms(int(flashrate * 1000))
                 self.led_pin.off()
@@ -205,7 +213,7 @@ class AdcAmperage(BaseESP32Worker):
 
     @property
     def get_config(self) -> str:
-        """ Get the current configuration and return in the following format: 
+        """ Get the current configuration and return in the following format:
             CONFIG:{interval}:{timeout}:{baseline_time}:{pin}:{name}:{baseline}[:{pin}:{name}:{baseline}...]
         """
         config_line = f"CONFIG:{self.config['adc'].get('interval', 100)}:{self.config['adc'].get('timeout', 600)}:{self.config['adc'].get('baseline_time', 10)}"
@@ -215,7 +223,7 @@ class AdcAmperage(BaseESP32Worker):
         return config_line
 
     async def baseline_ammeter(self) -> None:
-        """ initialize the ammeter reading.  Assumption is there is no load on the circuit.  
+        """ initialize the ammeter reading.  Assumption is there is no load on the circuit.
             Length of test can be modified in the config file """
         # if sampling is in progress, stop it first
         self.baseline_task = True
@@ -234,7 +242,7 @@ class AdcAmperage(BaseESP32Worker):
             value_list = []
             while time.time() < self.init_stop_time:
                 # Read the ADC
-                value_list.append(adc_conf['obj'].read())
+                value_list.append(adc_conf['obj'].read_uv())
                 gc.collect()
                 await uasyncio.sleep_ms(self.config['adc'].get('interval', 100))
             # calculate baseline value
@@ -269,12 +277,12 @@ class AdcAmperage(BaseESP32Worker):
 
             # read count used to populate the log
             read_count = self.config['adc'].get('avg_count', 5)
-            start_ticks = time.ticks_ms()
+            start_ticks = ticks_ms()
             while time.time() < self.sampling_stop_time:
                 record = "DATA"
                 for adc_conf in self.config['adc']['pins']:
-                    ticks = time.ticks_diff(time.ticks_ms(), start_ticks)
-                    amps = _calc_amperage(adc_conf['obj'].read(), adc_conf.get('baseline', 4095/2), adc_conf['max_amperage'], adc_conf['zero_voltage'])
+                    ticks = ticks_diff(ticks_ms(), start_ticks)
+                    amps = _calc_amperage(adc_conf['obj'].read_uv(), adc_conf.get('baseline', 2450000), adc_conf.get('mv_per_a', 185))
                     adc_conf['log'][read_count % self.config['adc'].get('avg_count', 5)] = amps
                     # discard highest and lowest value
                     log_temp = adc_conf['log'].copy()
@@ -285,7 +293,7 @@ class AdcAmperage(BaseESP32Worker):
                 with self.uart_write_lock:
                     self.uart.write(f"{record}\n")
 
-                time.sleep_ms(self.config['adc'].get('interval', 100))
+                sleep_ms(self.config['adc'].get('interval', 100))
 
             with self.uart_write_lock:
                 self.log(f'STOP:{time.time()}', DEBUG)
@@ -316,11 +324,11 @@ class AdcAmperage(BaseESP32Worker):
         read_count = self.config['adc'].get('avg_count', 5)
         for adc_conf in self.config['adc']['pins']:
             adc_conf['log'] = [0] * self.config['adc'].get('avg_count', 5)
-        start_ticks = time.ticks_ms()
+        start_ticks = ticks_ms()
         for i in range(read_count):
             for adc_conf in self.config['adc']['pins']:
-                ticks = time.ticks_diff(time.ticks_ms(), start_ticks)
-                amps = _calc_amperage(adc_conf['obj'].read(), adc_conf.get('baseline', int(4095/2)), adc_conf['max_amperage'], adc_conf['zero_voltage'])
+                ticks = ticks_diff(ticks_ms(), start_ticks)
+                amps = _calc_amperage(adc_conf['obj'].read_uv(), adc_conf.get('baseline', 2450000), adc_conf.get('mv_per_a', 185))
                 adc_conf['log'][i] = amps
             read_count += 1
             await uasyncio.sleep_ms(self.config['adc'].get('interval', 100))
@@ -332,6 +340,6 @@ class AdcAmperage(BaseESP32Worker):
             self.uart.write(f"{record}\n")
 
 
-def _calc_amperage(adc_read:int, adc_baseline:int, max_amps:int, zero_voltage:float) -> float:
+def _calc_amperage(adc_read:int, adc_baseline:int, mv_per_amp:int) -> float:
     """ Calculate the amperage based on the ready, baseline, max amperage of the sensor and zero point voltage of the sensor """
-    return (adc_baseline - adc_read) * 3.3 / 4095 * max_amps / zero_voltage
+    return ((adc_baseline) - (adc_read)) / (mv_per_amp * 1000.0)

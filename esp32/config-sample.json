@@ -13,10 +13,7 @@
                 "name": "sensor1pin32",
                 "pin": 32,
                 "atten": 11,
-                "zero_voltage": 2.5,
-                "max_voltage": 3.3,
-                "max_adc_read": 4095,
-                "max_amperage": 20
+                "mv_per_a": 185
             }
         ]
     },

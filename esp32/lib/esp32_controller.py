@@ -13,7 +13,7 @@ class BaseESP32Worker:
         self._config_file = config_file
         self._update_functions = []
         self.wlan = None
-        self.config = None
+        self.config = {}
         self.mqtt = None
         self.load_config_file()
         self.network_ready()
@@ -25,7 +25,7 @@ class BaseESP32Worker:
         """ Reload the config file from flash and build a list of functions to call to reload """
         try:
             self.log(f'Opening local config file "{self._config_file}"...')
-            input_file = open(self._config_file, 'r')
+            input_file = open(self._config_file, 'r', encoding='utf-8')
             self.config = json.loads(input_file.read())
             input_file.close()
             return True
@@ -38,7 +38,7 @@ class BaseESP32Worker:
         try:
             if isinstance(self.config) == dict and self.config != {}:
                 self.log(f'Writing local config file "{self._config_file}"...')
-                with open(self._config_file, 'w') as output_file:
+                with open(self._config_file, 'w', encoding='utf-8') as output_file:
                     json.dump(self.config, output_file)
                 return True
         except Exception as e:
@@ -75,7 +75,7 @@ class BaseESP32Worker:
         # if webrepl is set to enabled, turn it on now
         if 'webrepl' in self.config and self.config['webrepl'].get('enabled', False) and self.config['webrepl'].get('password', None) is not None:
             import webrepl
-            with open('webrepl_cfg.py', 'w') as output_file:
+            with open('webrepl_cfg.py', 'w', encoding='utf-8') as output_file:
                 output_file.write(f"PASS = {self.config['webrepl']['password']}\n")
             webrepl.start(password=self.config['webrepl']['password'])
 
